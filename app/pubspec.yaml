@@ -34,6 +34,7 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -56,6 +57,19 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/images/tomato.svg
+
+  fonts:
+    - family: NEXONLv1Gothic
+      fonts:
+        - asset: assets/fonts/NEXONLv1Gothic-Regular.otf
+        - asset: assets/fonts/NEXONLv1Gothic-Bold.otf
+          weight: 700
+    - family: KyoboHandwriting2025
+      fonts:
+        - asset: assets/fonts/KyoboHandwriting2025lyb.otf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

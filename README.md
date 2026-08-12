@@ -26,3 +26,4 @@ The first server scaffold exposes:
 
 - `GET /health`
 - `GET /api/menus?date=YYYY-MM-DD`
+- `GET /api/home?date=YYYY-MM-DD&at=ISO_DATE`
