@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.CAMERA" />
 
     <application
-        android:label="today_bob_app"
+        android:label="오늘밥뭐야"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

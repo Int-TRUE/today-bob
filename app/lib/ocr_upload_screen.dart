@@ -1,8 +1,11 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:today_bob_app/services/meal_table_ocr_service.dart';
 
 class OcrUploadScreen extends StatefulWidget {
   const OcrUploadScreen({super.key});
@@ -13,14 +16,12 @@ class OcrUploadScreen extends StatefulWidget {
 
 class _OcrUploadScreenState extends State<OcrUploadScreen> {
   final ImagePicker _imagePicker = ImagePicker();
-  final TextRecognizer _textRecognizer = TextRecognizer(
-    script: TextRecognitionScript.korean,
-  );
+  final MealTableOcrService _mealTableOcrService = MealTableOcrService();
   bool _isProcessing = false;
 
   @override
   void dispose() {
-    _textRecognizer.close();
+    _mealTableOcrService.close();
     super.dispose();
   }
 
@@ -39,22 +40,35 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
     });
 
     try {
-      final inputImage = InputImage.fromFilePath(image.path);
-      final recognizedText = await _textRecognizer.processImage(inputImage);
-      final weeklyMenu = WeeklyMenuOcrParser().parse(recognizedText);
+      final result = await _mealTableOcrService.recognize(image.path);
+      final weeklyMenu = WeeklyMenuOcrResult.fromMealTableOcrResult(result);
+      debugPrint(
+        'Cell OCR matchedDays=${weeklyMenu.matchedDays}, '
+        'menuLineCount=${weeklyMenu.menuLineCount}',
+      );
+      debugPrint('Cell OCR rawText=${weeklyMenu.rawText}');
       if (!mounted) return;
 
-      if (weeklyMenu.isReliable) {
-        await Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
+      if (weeklyMenu.canReview) {
+        final didUpload = await Navigator.of(context).push<bool>(
+          MaterialPageRoute<bool>(
             builder: (_) => OcrResultScreen(weeklyMenu: weeklyMenu),
           ),
         );
+        if (didUpload == true && mounted) {
+          Navigator.of(context).pop(true);
+        }
       } else {
-        await Navigator.of(context).pushReplacement(
+        await Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (_) => const OcrFailureScreen()),
         );
       }
+    } on MealTableOcrException catch (error) {
+      debugPrint('Meal table OCR failed: $error');
+      if (!mounted) return;
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const OcrFailureScreen()));
     } finally {
       if (mounted) {
         setState(() {
@@ -189,13 +203,7 @@ class OcrFailureScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 62,
                 child: FilledButton(
-                  onPressed: () {
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const OcrUploadScreen(),
-                      ),
-                    );
-                  },
+                  onPressed: () => Navigator.of(context).pop(),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFFF5A52),
                     foregroundColor: Colors.white,
@@ -216,9 +224,14 @@ class OcrFailureScreen extends StatelessWidget {
 }
 
 class OcrResultScreen extends StatefulWidget {
-  const OcrResultScreen({super.key, required this.weeklyMenu});
+  const OcrResultScreen({
+    super.key,
+    required this.weeklyMenu,
+    this.uploadApiClient = const MenuUploadApiClient(),
+  });
 
   final WeeklyMenuOcrResult weeklyMenu;
+  final MenuUploadApiClient uploadApiClient;
 
   @override
   State<OcrResultScreen> createState() => _OcrResultScreenState();
@@ -226,29 +239,92 @@ class OcrResultScreen extends StatefulWidget {
 
 class _OcrResultScreenState extends State<OcrResultScreen> {
   late DateTime _startDate;
+  late WeeklyMenuOcrResult _weeklyMenu;
+  var _isUploading = false;
+  String? _uploadError;
 
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _startDate = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(Duration(days: now.weekday - 1));
+    _startDate = _mondayOf(DateTime.now());
+    _weeklyMenu = widget.weeklyMenu.copy();
   }
 
   Future<void> _pickStartDate() async {
+    final firstMonday = _mondayOf(DateTime.now());
+    final lastMonday = firstMonday.add(const Duration(days: 14));
     final picked = await showDatePicker(
       context: context,
       initialDate: _startDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      firstDate: firstMonday,
+      lastDate: lastMonday,
+      selectableDayPredicate: (date) => date.weekday == DateTime.monday,
+      helpText: '시작일 선택',
+      cancelText: '취소',
+      confirmText: '선택',
     );
     if (picked == null) return;
 
     setState(() {
       _startDate = DateTime(picked.year, picked.month, picked.day);
+      _uploadError = null;
+    });
+  }
+
+  Future<void> _handleUpload() async {
+    if (_startDate.weekday != DateTime.monday) {
+      setState(() {
+        _uploadError = '시작일은 월요일이어야 해요.';
+      });
+      return;
+    }
+
+    if (_weeklyMenu.hasEmptyMenuCell) {
+      setState(() {
+        _uploadError = '비어 있는 식단을 모두 입력해주세요.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isUploading = true;
+      _uploadError = null;
+    });
+
+    try {
+      await widget.uploadApiClient.uploadWeek(
+        startDate: _startDate,
+        weeklyMenu: _weeklyMenu,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('식단이 등록됐어요.')));
+      Navigator.of(context).pop(true);
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _uploadError = '식단 등록에 실패했어요. 서버가 실행 중인지 확인해주세요.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
+    }
+  }
+
+  void _updateMenuCell(int dayIndex, OcrMealColumn column, List<String> items) {
+    setState(() {
+      final day = _weeklyMenu.days[dayIndex];
+      final target = column == OcrMealColumn.breakfast
+          ? day.breakfast
+          : day.dinner;
+      target
+        ..clear()
+        ..addAll(items);
+      _uploadError = null;
     });
   }
 
@@ -290,11 +366,35 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
               '${endDate.month}월 ${endDate.day}일까지',
               style: const TextStyle(fontSize: 16),
             ),
-            const SizedBox(height: 22),
+            if (_uploadError != null) ...[
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 34),
+                child: Text(
+                  _uploadError!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFFF5A52),
+                    fontSize: 13,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 18),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 26),
-                child: WeeklyMenuTable(result: widget.weeklyMenu),
+                child: Column(
+                  children: [
+                    WeeklyMenuTable(
+                      result: _weeklyMenu,
+                      onMenuChanged: _updateMenuCell,
+                    ),
+                    const SizedBox(height: 14),
+                    OcrCellDebugPanel(rawText: _weeklyMenu.rawText),
+                  ],
+                ),
               ),
             ),
             Padding(
@@ -305,13 +405,15 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
                     child: SizedBox(
                       height: 62,
                       child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.of(context).pushReplacement(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const OcrUploadScreen(),
-                            ),
-                          );
-                        },
+                        onPressed: _isUploading
+                            ? null
+                            : () {
+                                Navigator.of(context).pushReplacement(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => const OcrUploadScreen(),
+                                  ),
+                                );
+                              },
                         style: OutlinedButton.styleFrom(
                           backgroundColor: Colors.white,
                           foregroundColor: Colors.black,
@@ -332,13 +434,7 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
                     child: SizedBox(
                       height: 62,
                       child: FilledButton(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('업로드 API는 다음 단계에서 연결합니다.'),
-                            ),
-                          );
-                        },
+                        onPressed: _isUploading ? null : _handleUpload,
                         style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFFFF5A52),
                           foregroundColor: Colors.white,
@@ -346,10 +442,19 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
                             borderRadius: BorderRadius.circular(16),
                           ),
                         ),
-                        child: const Text(
-                          '이렇게 업로드!',
-                          style: TextStyle(fontSize: 16),
-                        ),
+                        child: _isUploading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                '이렇게 업로드!',
+                                style: TextStyle(fontSize: 16),
+                              ),
                       ),
                     ),
                   ),
@@ -363,22 +468,73 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
   }
 }
 
-class WeeklyMenuTable extends StatelessWidget {
-  const WeeklyMenuTable({super.key, required this.result});
+class OcrCellDebugPanel extends StatelessWidget {
+  const OcrCellDebugPanel({super.key, required this.rawText});
 
-  final WeeklyMenuOcrResult result;
+  final String rawText;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: const Color(0xFFE8E8E8)),
+        border: Border.all(color: const Color(0xFFE1E1E1)),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+        title: const Text(
+          'OCR 셀 결과 보기',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SelectableText(
+              rawText.trim().isEmpty ? '(empty)' : rawText.trim(),
+              style: const TextStyle(
+                color: Color(0xFF333333),
+                fontFamily: 'monospace',
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class WeeklyMenuTable extends StatelessWidget {
+  const WeeklyMenuTable({
+    super.key,
+    required this.result,
+    required this.onMenuChanged,
+  });
+
+  final WeeklyMenuOcrResult result;
+  final void Function(int dayIndex, OcrMealColumn column, List<String> items)
+  onMenuChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE1E1E1)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 8,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         children: [
           const BinderHoleRow(),
-          const Divider(height: 1, color: Color(0xFF222222)),
+          const Divider(height: 1, color: Color(0xFF3A3A3A)),
           const SizedBox(
             height: 30,
             child: Row(
@@ -386,20 +542,38 @@ class WeeklyMenuTable extends StatelessWidget {
                 SizedBox(width: 60),
                 Expanded(
                   child: Center(
-                    child: Text('조식', style: TextStyle(fontSize: 12)),
+                    child: Text(
+                      '아침',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
-                VerticalDivider(width: 1, color: Color(0xFF222222)),
+                VerticalDivider(width: 1, color: Color(0xFF3A3A3A)),
                 Expanded(
                   child: Center(
-                    child: Text('석식', style: TextStyle(fontSize: 12)),
+                    child: Text(
+                      '저녁',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1, color: Color(0xFF222222)),
-          ...result.days.map((day) => WeeklyMenuTableRow(dayMenu: day)),
+          const Divider(height: 1, color: Color(0xFF3A3A3A)),
+          ...result.days.indexed.map((entry) {
+            return WeeklyMenuTableRow(
+              dayIndex: entry.$1,
+              dayMenu: entry.$2,
+              onMenuChanged: onMenuChanged,
+            );
+          }),
         ],
       ),
     );
@@ -432,9 +606,17 @@ class BinderHoleRow extends StatelessWidget {
 }
 
 class WeeklyMenuTableRow extends StatelessWidget {
-  const WeeklyMenuTableRow({super.key, required this.dayMenu});
+  const WeeklyMenuTableRow({
+    super.key,
+    required this.dayIndex,
+    required this.dayMenu,
+    required this.onMenuChanged,
+  });
 
+  final int dayIndex;
   final DayMenuOcrResult dayMenu;
+  final void Function(int dayIndex, OcrMealColumn column, List<String> items)
+  onMenuChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -447,14 +629,31 @@ class WeeklyMenuTableRow extends StatelessWidget {
             child: Center(
               child: Text(
                 dayMenu.weekday,
-                style: const TextStyle(fontSize: 20),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
-          const VerticalDivider(width: 1, color: Color(0xFF222222)),
-          Expanded(child: _MenuCell(items: dayMenu.breakfast)),
-          const VerticalDivider(width: 1, color: Color(0xFF222222)),
-          Expanded(child: _MenuCell(items: dayMenu.dinner)),
+          const VerticalDivider(width: 1, color: Color(0xFF3A3A3A)),
+          Expanded(
+            child: _MenuCell(
+              items: dayMenu.breakfast,
+              onChanged: (items) {
+                onMenuChanged(dayIndex, OcrMealColumn.breakfast, items);
+              },
+            ),
+          ),
+          const VerticalDivider(width: 1, color: Color(0xFF3A3A3A)),
+          Expanded(
+            child: _MenuCell(
+              items: dayMenu.dinner,
+              onChanged: (items) {
+                onMenuChanged(dayIndex, OcrMealColumn.dinner, items);
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -462,35 +661,144 @@ class WeeklyMenuTableRow extends StatelessWidget {
 }
 
 class _MenuCell extends StatelessWidget {
-  const _MenuCell({required this.items});
+  const _MenuCell({required this.items, required this.onChanged});
 
   final List<String> items;
+  final ValueChanged<List<String>> onChanged;
+
+  Future<void> _editItems(BuildContext context) async {
+    final controller = TextEditingController(text: items.join('\n'));
+    final editedItems = await showDialog<List<String>>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('메뉴 수정'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 5,
+            maxLines: 9,
+            decoration: const InputDecoration(
+              hintText: '메뉴를 한 줄에 하나씩 입력',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(<String>[]),
+              child: const Text('비우기'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final nextItems = controller.text
+                    .split(RegExp(r'\r?\n'))
+                    .map((item) => item.trim())
+                    .where((item) => item.isNotEmpty)
+                    .toList();
+                Navigator.of(context).pop(nextItems);
+              },
+              child: const Text('저장'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+
+    if (editedItems != null) {
+      onChanged(editedItems);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 94),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFF222222))),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: items.take(7).map((item) {
-          return Text(
-            item,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 12,
-              height: 1.15,
-              decoration: TextDecoration.underline,
-            ),
-          );
-        }).toList(),
+    return InkWell(
+      onTap: () => _editItems(context),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 94),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Color(0xFF3A3A3A))),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: items.isEmpty
+              ? const [
+                  Text(
+                    '메뉴 추가',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFFFF5A52),
+                      fontSize: 12,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ]
+              : items.take(7).map((item) {
+                  return Text(
+                    item,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.18,
+                      decoration: TextDecoration.underline,
+                    ),
+                  );
+                }).toList(),
+        ),
       ),
     );
+  }
+}
+
+enum OcrMealColumn { breakfast, dinner }
+
+class MenuUploadApiClient {
+  const MenuUploadApiClient({this.baseUrl});
+
+  final String? baseUrl;
+
+  Future<void> uploadWeek({
+    required DateTime startDate,
+    required WeeklyMenuOcrResult weeklyMenu,
+  }) async {
+    final uri = Uri.parse('${baseUrl ?? _defaultBaseUrl()}/api/menus/week');
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 3);
+
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      request.write(
+        jsonEncode({
+          'startDate': _apiDate(startDate),
+          'days': weeklyMenu.days.map((day) {
+            return {
+              'weekday': day.weekday,
+              'breakfast': day.breakfast,
+              'dinner': day.dinner,
+            };
+          }).toList(),
+        }),
+      );
+
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(body, uri: uri);
+      }
+    } finally {
+      client.close(force: true);
+    }
   }
 }
 
@@ -506,11 +814,11 @@ class WeeklyMenuOcrParser {
     }
 
     final dayLines =
-        lines.where((line) => _weekdayLabels.contains(line.text)).toList()
+        lines.where((line) => _weekdayLabelFor(line.text) != null).toList()
           ..sort((a, b) => a.centerY.compareTo(b.centerY));
 
     final columnDivider = _columnDivider(lines);
-    final rowAnchors = _rowAnchors(dayLines);
+    final rowAnchors = _rowAnchors(lines, dayLines);
     final days = _weekdayLabels
         .map((label) => DayMenuOcrResult(weekday: label))
         .toList();
@@ -550,7 +858,12 @@ class WeeklyMenuOcrParser {
         .where((line) => line.text.contains('조식'))
         .toList();
     final dinnerHeader = lines
-        .where((line) => line.text.contains('석식') || line.text.contains('식식'))
+        .where(
+          (line) =>
+              line.text.contains('석식') ||
+              line.text.contains('식식') ||
+              line.text.contains('적식'),
+        )
         .toList();
 
     if (breakfastHeader.isNotEmpty && dinnerHeader.isNotEmpty) {
@@ -566,11 +879,56 @@ class WeeklyMenuOcrParser {
     return (menuCenters.reduce(math.min) + menuCenters.reduce(math.max)) / 2;
   }
 
-  List<_RowAnchor> _rowAnchors(List<_OcrLine> dayLines) {
-    if (dayLines.length >= 4) {
-      return dayLines.map((line) {
-        return _RowAnchor(weekday: line.text, centerY: line.centerY);
+  List<_RowAnchor> _rowAnchors(List<_OcrLine> lines, List<_OcrLine> dayLines) {
+    if (dayLines.length >= _weekdayLabels.length) {
+      return dayLines.take(_weekdayLabels.length).indexed.map((entry) {
+        return _RowAnchor(
+          weekday: _weekdayLabelFor(entry.$2.text) ?? _weekdayLabels[entry.$1],
+          centerY: entry.$2.centerY,
+        );
       }).toList();
+    }
+
+    if (dayLines.length >= 2) {
+      final sortedDayLines = [...dayLines]
+        ..sort((a, b) => a.centerY.compareTo(b.centerY));
+      final gaps = <double>[];
+      for (var index = 1; index < sortedDayLines.length; index += 1) {
+        gaps.add(
+          sortedDayLines[index].centerY - sortedDayLines[index - 1].centerY,
+        );
+      }
+      gaps.sort();
+
+      final rowGap = gaps[gaps.length ~/ 2];
+      final firstLabel = _weekdayLabelFor(sortedDayLines.first.text);
+      final firstLabelIndex = math.max(
+        0,
+        _weekdayLabels.indexOf(firstLabel ?? _weekdayLabels.first),
+      );
+      final firstRowY = sortedDayLines.first.centerY - rowGap * firstLabelIndex;
+
+      return List.generate(_weekdayLabels.length, (index) {
+        return _RowAnchor(
+          weekday: _weekdayLabels[index],
+          centerY: firstRowY + rowGap * index,
+        );
+      });
+    }
+
+    final menuLines = lines.where((line) => !_shouldSkip(line.text)).toList()
+      ..sort((a, b) => a.centerY.compareTo(b.centerY));
+    if (menuLines.length >= _weekdayLabels.length) {
+      final minY = menuLines.first.centerY;
+      final maxY = menuLines.last.centerY;
+      final rowGap = (maxY - minY) / (_weekdayLabels.length - 1);
+
+      return List.generate(_weekdayLabels.length, (index) {
+        return _RowAnchor(
+          weekday: _weekdayLabels[index],
+          centerY: minY + rowGap * index,
+        );
+      });
     }
 
     return List.generate(7, (index) {
@@ -598,11 +956,33 @@ class WeeklyMenuOcrParser {
   }
 
   bool _shouldSkip(String text) {
-    if (_weekdayLabels.contains(text)) return true;
+    if (_weekdayLabelFor(text) != null) return true;
     if (text.contains('생활관') || text.contains('식단표')) return true;
-    if (text.contains('조식') || text.contains('석식')) return true;
+    if (text.contains('조식') || text.contains('석식') || text.contains('적식')) {
+      return true;
+    }
     if (text.length <= 1) return true;
     return false;
+  }
+
+  String? _weekdayLabelFor(String text) {
+    final normalized = text.trim();
+    if (_weekdayLabels.contains(normalized)) return normalized;
+
+    const fuzzyWeekdayLabels = {
+      '원': '월',
+      '왈': '월',
+      '와': '화',
+      '하': '화',
+      '수.': '수',
+      '숙': '수',
+      '묵': '목',
+      '득': '목',
+      '금.': '금',
+      '토.': '토',
+      '일.': '일',
+    };
+    return fuzzyWeekdayLabels[normalized];
   }
 
   String _normalize(String value) {
@@ -622,12 +1002,66 @@ class WeeklyMenuOcrResult {
     required this.menuLineCount,
   });
 
+  factory WeeklyMenuOcrResult.fromMealTableOcrResult(
+    MealTableOcrResult result,
+  ) {
+    final days = _weekdayLabels
+        .map((label) => DayMenuOcrResult(weekday: label))
+        .toList();
+
+    for (final cell in result.cells) {
+      if (cell.dayIndex < 0 || cell.dayIndex >= days.length) continue;
+      final target = cell.mealType == MealType.breakfast
+          ? days[cell.dayIndex].breakfast
+          : days[cell.dayIndex].dinner;
+      target
+        ..clear()
+        ..addAll(cell.menus);
+    }
+
+    final matchedDays = days
+        .where((day) => day.breakfast.isNotEmpty || day.dinner.isNotEmpty)
+        .length;
+    final menuLineCount = days.fold<int>(
+      0,
+      (count, day) => count + day.breakfast.length + day.dinner.length,
+    );
+
+    return WeeklyMenuOcrResult(
+      days: days,
+      rawText: result.rawText,
+      matchedDays: matchedDays,
+      menuLineCount: menuLineCount,
+    );
+  }
+
   final List<DayMenuOcrResult> days;
   final String rawText;
   final int matchedDays;
   final int menuLineCount;
 
   bool get isReliable => matchedDays >= 4 && menuLineCount >= 12;
+
+  bool get canReview {
+    final rawLineCount = rawText
+        .split(RegExp(r'\r?\n'))
+        .where((line) => line.trim().length > 1)
+        .length;
+    return isReliable || (menuLineCount >= 8 && rawLineCount >= 8);
+  }
+
+  bool get hasEmptyMenuCell {
+    return days.any((day) => day.breakfast.isEmpty || day.dinner.isEmpty);
+  }
+
+  WeeklyMenuOcrResult copy() {
+    return WeeklyMenuOcrResult(
+      days: days.map((day) => day.copy()).toList(),
+      rawText: rawText,
+      matchedDays: matchedDays,
+      menuLineCount: menuLineCount,
+    );
+  }
 }
 
 class DayMenuOcrResult {
@@ -641,6 +1075,14 @@ class DayMenuOcrResult {
   final String weekday;
   final List<String> breakfast;
   final List<String> dinner;
+
+  DayMenuOcrResult copy() {
+    return DayMenuOcrResult(
+      weekday: weekday,
+      breakfast: [...breakfast],
+      dinner: [...dinner],
+    );
+  }
 }
 
 class _OcrLine {
@@ -658,6 +1100,24 @@ class _RowAnchor {
 
   final String weekday;
   final double centerY;
+}
+
+DateTime _mondayOf(DateTime date) {
+  final stripped = DateTime(date.year, date.month, date.day);
+  return stripped.subtract(Duration(days: stripped.weekday - 1));
+}
+
+String _apiDate(DateTime date) {
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
+}
+
+String _defaultBaseUrl() {
+  const configured = String.fromEnvironment('API_BASE_URL');
+  if (configured.isNotEmpty) return configured;
+  if (Platform.isAndroid) return 'http://10.0.2.2:3000';
+  return 'http://127.0.0.1:3000';
 }
 
 const _weekdayLabels = ['월', '화', '수', '목', '금', '토', '일'];
