@@ -96,30 +96,22 @@ class _HomeScreenState extends State<HomeScreen> {
     if (hasMenu) {
       final shouldContinue = await showDialog<bool>(
         context: context,
+        barrierColor: const Color(0xFFEEEEEE),
         builder: (context) {
-          return AlertDialog(
-            title: const Text('이미 식단이 있어요'),
-            content: const Text('오늘 식단이 조회됩니다. 그래도 이번 주 식단을 업로드할까요?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('취소'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('업로드'),
-              ),
-            ],
-          );
+          return const ExistingMenuDialog();
         },
       );
 
       if (shouldContinue != true || !mounted) return;
     }
 
-    Navigator.of(
+    final didUpload = await Navigator.of(
       context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const OcrUploadScreen()));
+    ).push<bool>(MaterialPageRoute(builder: (_) => const OcrUploadScreen()));
+
+    if (didUpload == true && mounted) {
+      _loadHome();
+    }
   }
 
   @override
@@ -546,6 +538,85 @@ class OperatingHoursPill extends StatelessWidget {
   }
 }
 
+class ExistingMenuDialog extends StatelessWidget {
+  const ExistingMenuDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+      elevation: 0,
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 415),
+        padding: const EdgeInsets.fromLTRB(43, 51, 43, 43),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '이미 등록된 식단표가 있습니다.\n다시 업로드 하시겠습니까?',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 24, height: 1.22, color: Colors.black),
+            ),
+            const SizedBox(height: 30),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 62,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        side: const BorderSide(color: Color(0xFFE1E1E1)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('닫기', style: TextStyle(fontSize: 16)),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 62,
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF5A52),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '네! 다시 찍을래요',
+                          style: TextStyle(fontSize: 16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class HomeApiClient {
   HomeApiClient({String? baseUrl}) : baseUrl = baseUrl ?? _defaultBaseUrl();
 
@@ -555,7 +626,7 @@ class HomeApiClient {
     final uri = Uri.parse('$baseUrl/api/home').replace(
       queryParameters: {
         'date': _apiDate(date),
-        'at': DateTime.now().toIso8601String(),
+        'at': DateTime.now().toUtc().toIso8601String(),
       },
     );
     final client = HttpClient();
@@ -633,7 +704,7 @@ class HomeData {
   }
 }
 
-String _mealLabel(String type) => type == 'breakfast' ? '조식' : '저녁';
+String _mealLabel(String type) => type == 'breakfast' ? '아침' : '저녁';
 
 String _apiDate(DateTime date) {
   final month = date.month.toString().padLeft(2, '0');
