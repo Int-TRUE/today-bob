@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import 'ocr_upload_screen.dart';
+
 void main() {
   runApp(const TodayBobApp());
 }
@@ -115,9 +117,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (shouldContinue != true || !mounted) return;
     }
 
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const CameraPlaceholderScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const OcrUploadScreen()));
   }
 
   @override
@@ -539,24 +541,6 @@ class OperatingHoursPill extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class CameraPlaceholderScreen extends StatelessWidget {
-  const CameraPlaceholderScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('식단 업로드')),
-      body: const Center(
-        child: Text(
-          'OCR 카메라 화면은 다음 단계에서 연결합니다.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 18),
-        ),
       ),
     );
   }
