@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -96,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (hasMenu) {
       final shouldContinue = await showDialog<bool>(
         context: context,
-        barrierColor: const Color(0xFFEEEEEE),
+        barrierColor: Colors.black.withValues(alpha: 0.12),
         builder: (context) {
           return const ExistingMenuDialog();
         },
@@ -494,47 +495,144 @@ class OperatingHoursPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       height: 63,
       width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFF777777), width: 1.5),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFFFD0CD),
-                  shape: BoxShape.circle,
+      child: CustomPaint(
+        foregroundPainter: const DashedRoundedRectPainter(
+          color: Color(0xFF777777),
+          strokeWidth: 1.5,
+          radius: 18,
+          dashLength: 8,
+          gapLength: 6,
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: WatercolorMealBadge(label: mealLabel),
                 ),
-                child: Text(
-                  mealLabel,
-                  style: const TextStyle(fontSize: 24, color: Colors.black),
+              ),
+              const SizedBox(width: 19),
+              Flexible(
+                flex: 3,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    timeLabel,
+                    style: const TextStyle(fontSize: 24, color: Colors.black),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class WatercolorMealBadge extends StatelessWidget {
+  const WatercolorMealBadge({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 58,
+      height: 46,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(
+            child: ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(sigmaX: 4.5, sigmaY: 4.5),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFFFB9B5).withValues(alpha: 0.48),
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 19),
-          Flexible(
-            flex: 3,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                timeLabel,
-                style: const TextStyle(fontSize: 24, color: Colors.black),
+          Positioned(
+            left: 4,
+            top: 5,
+            right: 2,
+            bottom: 3,
+            child: ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(sigmaX: 2.8, sigmaY: 2.8),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFFFD0CD).withValues(alpha: 0.72),
+                ),
               ),
             ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 24, color: Colors.black),
           ),
         ],
       ),
     );
+  }
+}
+
+class DashedRoundedRectPainter extends CustomPainter {
+  const DashedRoundedRectPainter({
+    required this.color,
+    required this.strokeWidth,
+    required this.radius,
+    required this.dashLength,
+    required this.gapLength,
+  });
+
+  final Color color;
+  final double strokeWidth;
+  final double radius;
+  final double dashLength;
+  final double gapLength;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect =
+        Offset(strokeWidth / 2, strokeWidth / 2) &
+        Size(size.width - strokeWidth, size.height - strokeWidth);
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final end = (distance + dashLength).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(distance, end), paint);
+        distance += dashLength + gapLength;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant DashedRoundedRectPainter oldDelegate) {
+    return oldDelegate.color != color ||
+        oldDelegate.strokeWidth != strokeWidth ||
+        oldDelegate.radius != radius ||
+        oldDelegate.dashLength != dashLength ||
+        oldDelegate.gapLength != gapLength;
   }
 }
 
@@ -549,7 +647,7 @@ class ExistingMenuDialog extends StatelessWidget {
       backgroundColor: Colors.transparent,
       child: Container(
         constraints: const BoxConstraints(maxWidth: 415),
-        padding: const EdgeInsets.fromLTRB(43, 51, 43, 43),
+        padding: const EdgeInsets.fromLTRB(34, 42, 34, 36),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -560,9 +658,9 @@ class ExistingMenuDialog extends StatelessWidget {
             const Text(
               '이미 등록된 식단표가 있습니다.\n다시 업로드 하시겠습니까?',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 24, height: 1.22, color: Colors.black),
+              style: TextStyle(fontSize: 20, height: 1.35, color: Colors.black),
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 28),
             Row(
               children: [
                 Expanded(
@@ -580,7 +678,7 @@ class ExistingMenuDialog extends StatelessWidget {
                       ),
                       child: const FittedBox(
                         fit: BoxFit.scaleDown,
-                        child: Text('닫기', style: TextStyle(fontSize: 16)),
+                        child: Text('닫기', style: TextStyle(fontSize: 19)),
                       ),
                     ),
                   ),
@@ -602,7 +700,7 @@ class ExistingMenuDialog extends StatelessWidget {
                         fit: BoxFit.scaleDown,
                         child: Text(
                           '네! 다시 찍을래요',
-                          style: TextStyle(fontSize: 16),
+                          style: TextStyle(fontSize: 19),
                         ),
                       ),
                     ),
