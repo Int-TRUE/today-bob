@@ -1,0 +1,26 @@
+<svg width="390" height="844" viewBox="0 0 390 844" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="390" height="844" rx="34" fill="#FFFFFF"/>
+  <rect x="22" y="28" width="346" height="788" rx="28" fill="#FFFDF9" stroke="#EFE4D8"/>
+  <text x="195" y="86" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="22" font-weight="700" fill="#111111">오늘 밥 뭐야?</text>
+  <g transform="translate(70 116)">
+    <circle cx="28" cy="28" r="22" fill="#FF5A52" opacity="0.16"/>
+    <text x="28" y="35" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="18" font-weight="700" fill="#FF5A52">‹</text>
+    <text x="125" y="22" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="22" font-weight="700" fill="#111111">8월 14일</text>
+    <text x="125" y="50" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="16" fill="#7A7A7A">금요일</text>
+    <circle cx="222" cy="28" r="22" fill="#FF5A52" opacity="0.16"/>
+    <text x="222" y="35" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="18" font-weight="700" fill="#FF5A52">›</text>
+  </g>
+  <rect x="46" y="206" width="298" height="380" rx="16" fill="#FFFFFF" stroke="#FFB2AA" stroke-width="2" stroke-dasharray="8 8"/>
+  <circle cx="195" cy="206" r="28" fill="#FF5A52"/>
+  <path d="M185 202c6-11 16-11 22 0" stroke="#169B62" stroke-width="4" stroke-linecap="round"/>
+  <text x="195" y="287" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="20" font-weight="700" fill="#FF5A52">아침</text>
+  <text x="195" y="335" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="28" font-weight="700" fill="#111111">길거리토스트</text>
+  <text x="195" y="376" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="24" font-weight="600" fill="#111111">우유/요구르트</text>
+  <text x="195" y="414" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="24" font-weight="600" fill="#111111">버섯된장국</text>
+  <text x="195" y="452" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="24" font-weight="600" fill="#111111">샐러드/과일</text>
+  <text x="195" y="522" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="18" fill="#8C8C8C">07:00 ~ 09:00</text>
+  <rect x="55" y="626" width="280" height="34" rx="17" fill="#FFF1EF"/>
+  <text x="195" y="649" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="13" fill="#333333">샐러드를 먼저 먹어야 혈당 스파이크를...</text>
+  <rect x="46" y="700" width="298" height="58" rx="18" fill="#FF5A52"/>
+  <text x="195" y="736" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">이번 주 식단 업로드</text>
+</svg>

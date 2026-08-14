@@ -1,0 +1,41 @@
+<svg width="390" height="844" viewBox="0 0 390 844" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="390" height="844" rx="34" fill="#FFFFFF"/>
+  <text x="195" y="72" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="24" font-weight="700" fill="#111111">식단 등록</text>
+  <text x="195" y="112" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="15" fill="#777777">8월 10일 부터 8월 17일까지</text>
+  <rect x="28" y="144" width="334" height="520" rx="14" fill="#FFFFFF" stroke="#E6E1DC"/>
+  <g font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif">
+    <rect x="28" y="144" width="334" height="42" rx="14" fill="#FFF1EF"/>
+    <text x="64" y="171" font-size="14" font-weight="700" fill="#FF5A52">요일</text>
+    <text x="154" y="171" font-size="14" font-weight="700" fill="#FF5A52">아침</text>
+    <text x="276" y="171" font-size="14" font-weight="700" fill="#FF5A52">저녁</text>
+    <g stroke="#EEE6DF">
+      <line x1="94" y1="186" x2="94" y2="664"/>
+      <line x1="228" y1="186" x2="228" y2="664"/>
+      <line x1="28" y1="246" x2="362" y2="246"/>
+      <line x1="28" y1="306" x2="362" y2="306"/>
+      <line x1="28" y1="366" x2="362" y2="366"/>
+      <line x1="28" y1="426" x2="362" y2="426"/>
+      <line x1="28" y1="486" x2="362" y2="486"/>
+      <line x1="28" y1="546" x2="362" y2="546"/>
+      <line x1="28" y1="606" x2="362" y2="606"/>
+    </g>
+    <g font-size="14" font-weight="700" fill="#111111">
+      <text x="58" y="222">월</text><text x="58" y="282">화</text><text x="58" y="342">수</text>
+      <text x="58" y="402">목</text><text x="58" y="462">금</text><text x="58" y="522">토</text><text x="58" y="582">일</text>
+    </g>
+    <g font-size="12" fill="#222222">
+      <text x="108" y="214">에그샌드위치</text><text x="108" y="232">우유/과일쥬스</text>
+      <text x="242" y="214">콩나물밥</text><text x="242" y="232">소고기우거지국</text>
+      <text x="108" y="274">유부초밥</text><text x="108" y="292">어묵탕</text>
+      <text x="242" y="274">돈개장</text><text x="242" y="292">계란말이</text>
+      <text x="108" y="334">베이컨샌드위치</text><text x="108" y="352">북어국</text>
+      <text x="242" y="334">김밥</text><text x="242" y="352">컵라면</text>
+      <text x="108" y="394">치킨까스샌드위치</text><text x="242" y="394">마파두부덮밥</text>
+      <text x="108" y="454">길거리토스트</text><text x="242" y="454">한방삼계탕</text>
+      <text x="108" y="514">스테이크샌드위치</text><text x="242" y="514">오꼬노미야끼</text>
+      <text x="108" y="574">김밥</text><text x="242" y="574">삼겹살김치볶음</text>
+    </g>
+  </g>
+  <rect x="44" y="704" width="302" height="58" rx="18" fill="#FF5A52"/>
+  <text x="195" y="740" text-anchor="middle" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">업로드</text>
+</svg>
