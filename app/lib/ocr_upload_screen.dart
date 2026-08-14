@@ -8,7 +8,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:today_bob_app/services/meal_table_ocr_service.dart';
 
 class OcrUploadScreen extends StatefulWidget {
-  const OcrUploadScreen({super.key});
+  const OcrUploadScreen({super.key, required this.deviceId});
+
+  final String deviceId;
 
   @override
   State<OcrUploadScreen> createState() => _OcrUploadScreenState();
@@ -52,7 +54,10 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
       if (weeklyMenu.canReview) {
         final didUpload = await Navigator.of(context).push<bool>(
           MaterialPageRoute<bool>(
-            builder: (_) => OcrResultScreen(weeklyMenu: weeklyMenu),
+            builder: (_) => OcrResultScreen(
+              weeklyMenu: weeklyMenu,
+              deviceId: widget.deviceId,
+            ),
           ),
         );
         if (didUpload == true && mounted) {
@@ -227,10 +232,12 @@ class OcrResultScreen extends StatefulWidget {
   const OcrResultScreen({
     super.key,
     required this.weeklyMenu,
+    required this.deviceId,
     this.uploadApiClient = const MenuUploadApiClient(),
   });
 
   final WeeklyMenuOcrResult weeklyMenu;
+  final String deviceId;
   final MenuUploadApiClient uploadApiClient;
 
   @override
@@ -295,6 +302,7 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
       await widget.uploadApiClient.uploadWeek(
         startDate: _startDate,
         weeklyMenu: _weeklyMenu,
+        deviceId: widget.deviceId,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -410,7 +418,9 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
                             : () {
                                 Navigator.of(context).pushReplacement(
                                   MaterialPageRoute<void>(
-                                    builder: (_) => const OcrUploadScreen(),
+                                    builder: (_) => OcrUploadScreen(
+                                      deviceId: widget.deviceId,
+                                    ),
                                   ),
                                 );
                               },
@@ -767,6 +777,7 @@ class MenuUploadApiClient {
   Future<void> uploadWeek({
     required DateTime startDate,
     required WeeklyMenuOcrResult weeklyMenu,
+    required String deviceId,
   }) async {
     final uri = Uri.parse('${baseUrl ?? _defaultBaseUrl()}/api/menus/week');
     final client = HttpClient();
@@ -775,6 +786,7 @@ class MenuUploadApiClient {
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
+      request.headers.set('x-device-id', deviceId);
       request.write(
         jsonEncode({
           'startDate': _apiDate(startDate),
