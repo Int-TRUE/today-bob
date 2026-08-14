@@ -38,6 +38,7 @@ dependencies:
   google_mlkit_text_recognition: ^0.16.0
   image_picker: ^1.2.3
   image: ^4.9.1
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +65,7 @@ flutter:
   assets:
     - assets/images/app_icon.png
     - assets/images/tomato.svg
+    - assets/images/tomato_gold.png
 
   fonts:
     - family: NEXONLv1Gothic

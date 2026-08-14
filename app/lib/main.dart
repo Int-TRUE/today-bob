@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ocr_upload_screen.dart';
 
@@ -13,9 +15,16 @@ void main() {
 }
 
 class TodayBobApp extends StatelessWidget {
-  const TodayBobApp({super.key, this.apiClient});
+  const TodayBobApp({
+    super.key,
+    this.apiClient,
+    this.deviceApprovalClient,
+    this.deviceIdentityStore,
+  });
 
   final HomeApiClient? apiClient;
+  final DeviceApprovalApiClient? deviceApprovalClient;
+  final DeviceIdentityStore? deviceIdentityStore;
 
   @override
   Widget build(BuildContext context) {
@@ -28,15 +37,425 @@ class TodayBobApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.white,
         useMaterial3: true,
       ),
-      home: HomeScreen(apiClient: apiClient ?? HomeApiClient()),
+      home: DeviceApprovalGate(
+        approvalClient: deviceApprovalClient ?? DeviceApprovalApiClient(),
+        identityStore: deviceIdentityStore ?? DeviceIdentityStore(),
+        homeBuilder: (_, deviceId) => HomeScreen(
+          apiClient: apiClient ?? HomeApiClient(),
+          deviceId: deviceId,
+        ),
+      ),
+    );
+  }
+}
+
+class DeviceApprovalGate extends StatefulWidget {
+  const DeviceApprovalGate({
+    super.key,
+    required this.approvalClient,
+    required this.identityStore,
+    required this.homeBuilder,
+  });
+
+  final DeviceApprovalApiClient approvalClient;
+  final DeviceIdentityStore identityStore;
+  final Widget Function(BuildContext context, String deviceId) homeBuilder;
+
+  @override
+  State<DeviceApprovalGate> createState() => _DeviceApprovalGateState();
+}
+
+class _DeviceApprovalGateState extends State<DeviceApprovalGate>
+    with WidgetsBindingObserver {
+  final TextEditingController _teamController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
+  DeviceRegistration? _registration;
+  bool _isLoading = true;
+  bool _isSubmitting = false;
+  String? _deviceId;
+  String? _errorMessage;
+
+  bool get _isPending => _registration?.approvalStatus == 'N';
+  bool get _isApproved => _registration?.approvalStatus == 'Y';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadRegistration();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _teamController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_isApproved) {
+      _loadRegistration(silent: true);
+    }
+  }
+
+  Future<void> _loadRegistration({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final deviceId = await widget.identityStore.getOrCreateDeviceId();
+      final registration = await widget.approvalClient.fetchRegistration(
+        deviceId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _deviceId = deviceId;
+        _registration = registration;
+        _teamController.text = registration?.teamName ?? '';
+        _nameController.text = registration?.memberName ?? '';
+        _isLoading = false;
+        _errorMessage = null;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '승인 상태를 확인하지 못했어요';
+      });
+    }
+  }
+
+  Future<void> _submitRegistration() async {
+    final teamName = _teamController.text.trim();
+    final memberName = _nameController.text.trim();
+    if (teamName.isEmpty || memberName.isEmpty) return;
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final deviceId =
+          _deviceId ?? await widget.identityStore.getOrCreateDeviceId();
+      final registration = await widget.approvalClient.submitRegistration(
+        deviceId: deviceId,
+        teamName: teamName,
+        memberName: memberName,
+      );
+      if (!mounted) return;
+      setState(() {
+        _deviceId = deviceId;
+        _registration = registration;
+        _teamController.text = registration.teamName;
+        _nameController.text = registration.memberName;
+        _isSubmitting = false;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _errorMessage = '가입 신청에 실패했어요';
+      });
+    }
+  }
+
+  Future<void> _cancelRegistration() async {
+    final deviceId = _deviceId;
+    if (deviceId == null || _isSubmitting) return;
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.approvalClient.cancelRegistration(deviceId);
+      if (!mounted) return;
+      setState(() {
+        _registration = null;
+        _teamController.clear();
+        _nameController.clear();
+        _isSubmitting = false;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _errorMessage = '신청 취소에 실패했어요';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isApproved) {
+      return widget.homeBuilder(
+        context,
+        _registration?.deviceId ?? _deviceId ?? '',
+      );
+    }
+
+    return SplashRegistrationScreen(
+      teamController: _teamController,
+      nameController: _nameController,
+      isLoading: _isLoading,
+      isSubmitting: _isSubmitting,
+      isPending: _isPending,
+      errorMessage: _errorMessage,
+      onSubmit: _submitRegistration,
+      onCancel: _cancelRegistration,
+      onRetry: () => _loadRegistration(),
+    );
+  }
+}
+
+class SplashRegistrationScreen extends StatelessWidget {
+  const SplashRegistrationScreen({
+    super.key,
+    required this.teamController,
+    required this.nameController,
+    required this.isLoading,
+    required this.isSubmitting,
+    required this.isPending,
+    required this.errorMessage,
+    required this.onSubmit,
+    required this.onCancel,
+    required this.onRetry,
+  });
+
+  final TextEditingController teamController;
+  final TextEditingController nameController;
+  final bool isLoading;
+  final bool isSubmitting;
+  final bool isPending;
+  final String? errorMessage;
+  final VoidCallback onSubmit;
+  final VoidCallback onCancel;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 405),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 31),
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 72),
+                          const SplashBrand(),
+                          const SizedBox(height: 76),
+                          if (isLoading)
+                            const SizedBox(
+                              height: 214,
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFFFF5A52),
+                                ),
+                              ),
+                            )
+                          else ...[
+                            SplashTextField(
+                              controller: teamController,
+                              hintText: '소속 팀 명',
+                              enabled: !isPending && !isSubmitting,
+                            ),
+                            const SizedBox(height: 13),
+                            SplashTextField(
+                              controller: nameController,
+                              hintText: '이름',
+                              enabled: !isPending && !isSubmitting,
+                            ),
+                            const SizedBox(height: 13),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 62,
+                              child: FilledButton(
+                                onPressed: isPending || isSubmitting
+                                    ? null
+                                    : onSubmit,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: isPending
+                                      ? const Color(0xFFC3C3C3)
+                                      : const Color(0xFFFF5A52),
+                                  disabledBackgroundColor: isPending
+                                      ? const Color(0xFFC3C3C3)
+                                      : const Color(0xFFFFB5B1),
+                                  foregroundColor: Colors.white,
+                                  disabledForegroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                ),
+                                child: Text(
+                                  isPending ? '신청 완료' : '가입 신청',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    height: 1,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (isPending) ...[
+                              const SizedBox(height: 28),
+                              TextButton(
+                                onPressed: isSubmitting ? null : onCancel,
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.black,
+                                  disabledForegroundColor: const Color(
+                                    0xFFBDBDBD,
+                                  ),
+                                  minimumSize: Size.zero,
+                                  padding: EdgeInsets.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: const Text(
+                                  '신청취소',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    decoration: TextDecoration.underline,
+                                    decorationColor: Colors.black,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (errorMessage != null) ...[
+                              const SizedBox(height: 12),
+                              GestureDetector(
+                                onTap: onRetry,
+                                child: Text(
+                                  errorMessage!,
+                                  style: const TextStyle(
+                                    color: Color(0xFFFF5A52),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                          const SizedBox(height: 22),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class SplashBrand extends StatelessWidget {
+  const SplashBrand({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Image.asset(
+          'assets/images/tomato_gold.png',
+          width: 150,
+          height: 150,
+          fit: BoxFit.contain,
+        ),
+        const SizedBox(height: 28),
+        const Text(
+          '오늘 밥 뭐야?',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 32, height: 1, color: Colors.black),
+        ),
+        const SizedBox(height: 32),
+        const Text(
+          '금융결제원 생활관 사우들을 위한\n앱으로, 가입 승인이 필요합니다.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 16, height: 1.25, color: Colors.black),
+        ),
+      ],
+    );
+  }
+}
+
+class SplashTextField extends StatelessWidget {
+  const SplashTextField({
+    super.key,
+    required this.controller,
+    required this.hintText,
+    required this.enabled,
+  });
+
+  final TextEditingController controller;
+  final String hintText;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 62,
+      child: TextField(
+        controller: controller,
+        enabled: enabled,
+        textInputAction: TextInputAction.next,
+        style: TextStyle(
+          fontSize: 24,
+          color: enabled ? Colors.black : const Color(0xFFCFCFCF),
+          height: 1.1,
+        ),
+        decoration: InputDecoration(
+          hintText: hintText,
+          hintStyle: const TextStyle(color: Color(0xFFD0D0D0), fontSize: 24),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 17,
+          ),
+          filled: true,
+          fillColor: enabled ? Colors.white : const Color(0xFFF4F4F4),
+          disabledBorder: _inputBorder(color: const Color(0xFFE0E0E0)),
+          enabledBorder: _inputBorder(),
+          focusedBorder: _inputBorder(color: const Color(0xFFFF5A52)),
+          border: _inputBorder(),
+        ),
+      ),
+    );
+  }
+
+  static OutlineInputBorder _inputBorder({
+    Color color = const Color(0xFFE1E1E1),
+  }) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(18),
+      borderSide: BorderSide(color: color, width: 1),
     );
   }
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.apiClient});
+  const HomeScreen({
+    super.key,
+    required this.apiClient,
+    required this.deviceId,
+  });
 
   final HomeApiClient apiClient;
+  final String deviceId;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -106,9 +525,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (shouldContinue != true || !mounted) return;
     }
 
-    final didUpload = await Navigator.of(
-      context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => const OcrUploadScreen()));
+    final didUpload = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => OcrUploadScreen(deviceId: widget.deviceId),
+      ),
+    );
 
     if (didUpload == true && mounted) {
       _loadHome();
@@ -752,6 +1173,154 @@ class HomeApiClient {
     if (configured.isNotEmpty) return configured;
     if (Platform.isAndroid) return 'http://10.0.2.2:3000';
     return 'http://127.0.0.1:3000';
+  }
+}
+
+class DeviceApprovalApiClient {
+  DeviceApprovalApiClient({String? baseUrl})
+    : baseUrl = baseUrl ?? HomeApiClient._defaultBaseUrl();
+
+  final String baseUrl;
+
+  Future<DeviceRegistration?> fetchRegistration(String deviceId) async {
+    final uri = Uri.parse('$baseUrl/api/device-registrations/$deviceId');
+    final response = await _sendJsonRequest(uri, method: 'GET');
+
+    if (response.statusCode == HttpStatus.notFound) {
+      return null;
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(response.body, uri: uri);
+    }
+
+    return DeviceRegistration.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<DeviceRegistration> submitRegistration({
+    required String deviceId,
+    required String teamName,
+    required String memberName,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/device-registrations');
+    final response = await _sendJsonRequest(
+      uri,
+      method: 'POST',
+      body: {
+        'deviceId': deviceId,
+        'teamName': teamName,
+        'memberName': memberName,
+        'platform': Platform.operatingSystem,
+      },
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(response.body, uri: uri);
+    }
+
+    return DeviceRegistration.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> cancelRegistration(String deviceId) async {
+    final uri = Uri.parse('$baseUrl/api/device-registrations/$deviceId');
+    final response = await _sendJsonRequest(uri, method: 'DELETE');
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(response.body, uri: uri);
+    }
+  }
+}
+
+class DeviceRegistration {
+  const DeviceRegistration({
+    required this.deviceId,
+    required this.teamName,
+    required this.memberName,
+    required this.approvalStatus,
+  });
+
+  final String deviceId;
+  final String teamName;
+  final String memberName;
+  final String approvalStatus;
+
+  factory DeviceRegistration.fromJson(Map<String, dynamic> json) {
+    return DeviceRegistration(
+      deviceId: json['deviceId'] as String? ?? '',
+      teamName: json['teamName'] as String? ?? '',
+      memberName: json['memberName'] as String? ?? '',
+      approvalStatus:
+          json['approvalStatus'] as String? ??
+          ((json['approved'] as bool? ?? false) ? 'Y' : 'N'),
+    );
+  }
+}
+
+class DeviceIdentityStore {
+  static const _deviceIdKey = 'today_bob_device_id';
+
+  Future<String> getOrCreateDeviceId() async {
+    final preferences = await SharedPreferences.getInstance();
+    final savedDeviceId = preferences.getString(_deviceIdKey);
+    if (savedDeviceId != null && savedDeviceId.isNotEmpty) {
+      return savedDeviceId;
+    }
+
+    final deviceId = _createDeviceId();
+    await preferences.setString(_deviceIdKey, deviceId);
+    return deviceId;
+  }
+
+  String _createDeviceId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return [
+      hex.substring(0, 8),
+      hex.substring(8, 12),
+      hex.substring(12, 16),
+      hex.substring(16, 20),
+      hex.substring(20),
+    ].join('-');
+  }
+}
+
+class _ApiResponse {
+  const _ApiResponse({required this.statusCode, required this.body});
+
+  final int statusCode;
+  final String body;
+}
+
+Future<_ApiResponse> _sendJsonRequest(
+  Uri uri, {
+  required String method,
+  Map<String, Object?>? body,
+}) async {
+  final client = HttpClient();
+  client.connectionTimeout = const Duration(seconds: 3);
+
+  try {
+    final request = await client.openUrl(method, uri);
+    request.headers.contentType = ContentType.json;
+    if (body != null) {
+      request.write(jsonEncode(body));
+    }
+
+    final response = await request.close().timeout(const Duration(seconds: 5));
+    return _ApiResponse(
+      statusCode: response.statusCode,
+      body: await response.transform(utf8.decoder).join(),
+    );
+  } finally {
+    client.close(force: true);
   }
 }
 
