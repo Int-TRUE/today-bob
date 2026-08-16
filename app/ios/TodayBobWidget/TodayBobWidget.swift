@@ -4,6 +4,9 @@ import WidgetKit
 
 private let apiBaseURL = "https://today-bob-server.vercel.app"
 
+// WidgetKit 확장은 Flutter 앱 프로세스와 별도로 실행됩니다.
+// 그래서 Dart 코드의 API 클라이언트를 재사용하지 못하고, Swift에서 /api/home을
+// 직접 호출해 작은 정방형 위젯에 필요한 메뉴/운영시간만 표시합니다.
 struct MealWidgetEntry: TimelineEntry {
     let date: Date
     let mealLabel: String
@@ -33,6 +36,7 @@ struct MealWidgetProvider: TimelineProvider {
         completion: @escaping (Timeline<MealWidgetEntry>) -> Void
     ) {
         Task {
+            // 위젯은 실패해도 앱처럼 에러 화면을 띄울 수 없으므로 짧은 fallback 문구를 씁니다.
             let entry = await fetchCurrentMeal() ?? MealWidgetEntry(
                 date: Date(),
                 mealLabel: "오늘",
@@ -45,6 +49,7 @@ struct MealWidgetProvider: TimelineProvider {
                 to: Date()
             ) ?? Date().addingTimeInterval(1800)
 
+            // 식단이 시간대에 따라 바뀌므로 너무 오래 캐시하지 않고 30분 뒤 갱신을 요청합니다.
             completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
         }
     }

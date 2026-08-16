@@ -7,6 +7,10 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image_picker/image_picker.dart';
 import 'package:today_bob_app/services/meal_table_ocr_service.dart';
 
+// 식단표 사진을 고르는 진입 화면입니다.
+//
+// 여기서는 “이미지를 얻고 OCR 서비스를 호출한 뒤 결과 화면으로 넘기는 일”만 맡고,
+// 실제 표 검출/셀 분할/OCR 정리는 MealTableOcrService와 WeeklyMenuOcrResult가 처리합니다.
 class OcrUploadScreen extends StatefulWidget {
   const OcrUploadScreen({super.key, required this.deviceId});
 
@@ -30,6 +34,8 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
   Future<void> _pickAndRecognize(ImageSource source) async {
     if (_isProcessing) return;
 
+    // 너무 큰 원본은 OCR 정확도보다 메모리 사용량에 부담이 커서 적당히 줄입니다.
+    // 실제 표 분할 단계에서는 이 이미지 안에서 다시 perspective 보정이 일어납니다.
     final image = await _imagePicker.pickImage(
       source: source,
       imageQuality: 95,
@@ -51,6 +57,8 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
       debugPrint('Cell OCR rawText=${weeklyMenu.rawText}');
       if (!mounted) return;
 
+      // OCR이 완벽하지 않아도 일정 수준 이상이면 편집 화면으로 보냅니다.
+      // 사용자가 직접 수정할 수 있으므로 “검토 가능한가”가 통과 기준입니다.
       if (weeklyMenu.canReview) {
         final didUpload = await Navigator.of(context).push<bool>(
           MaterialPageRoute<bool>(
@@ -786,6 +794,7 @@ class MenuUploadApiClient {
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
+      // 서버는 승인된 기기만 주간 식단을 저장할 수 있게 이 헤더를 검사합니다.
       request.headers.set('x-device-id', deviceId);
       request.write(
         jsonEncode({
@@ -815,6 +824,10 @@ class MenuUploadApiClient {
 }
 
 class WeeklyMenuOcrParser {
+  // 예전 방식의 전체 이미지 OCR 파서입니다.
+  //
+  // 현재 주 흐름은 MealTableOcrService가 셀 14개를 나눠 OCR하지만, 이 파서는
+  // OCR 결과가 전체 텍스트로만 들어오는 경우를 대비한 fallback/테스트 자산으로 남겨둡니다.
   WeeklyMenuOcrResult parse(RecognizedText recognizedText) {
     final lines = <_OcrLine>[];
     for (final block in recognizedText.blocks) {
@@ -866,6 +879,8 @@ class WeeklyMenuOcrParser {
   }
 
   double _columnDivider(List<_OcrLine> lines) {
+    // 표의 세로 구분선을 직접 찾기 어렵다면 “조식/석식” 헤더 위치나
+    // 메뉴 텍스트의 좌우 분포를 이용해 아침/저녁 경계를 추정합니다.
     final breakfastHeader = lines
         .where((line) => line.text.contains('조식'))
         .toList();
@@ -892,6 +907,8 @@ class WeeklyMenuOcrParser {
   }
 
   List<_RowAnchor> _rowAnchors(List<_OcrLine> lines, List<_OcrLine> dayLines) {
+    // 요일 글자가 정확히 인식되면 그 위치를 행 기준점으로 사용합니다.
+    // 일부만 인식되면 간격을 보간하고, 전혀 없으면 메뉴 텍스트 분포로 추정합니다.
     if (dayLines.length >= _weekdayLabels.length) {
       return dayLines.take(_weekdayLabels.length).indexed.map((entry) {
         return _RowAnchor(
@@ -1055,6 +1072,8 @@ class WeeklyMenuOcrResult {
   bool get isReliable => matchedDays >= 4 && menuLineCount >= 12;
 
   bool get canReview {
+    // 인식률이 낮아도 원문 라인이 충분하면 사용자가 편집으로 살릴 수 있으므로
+    // 실패 화면 대신 결과 화면에 진입시킵니다.
     final rawLineCount = rawText
         .split(RegExp(r'\r?\n'))
         .where((line) => line.trim().length > 1)

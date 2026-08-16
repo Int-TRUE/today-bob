@@ -138,6 +138,8 @@ const port = Number(process.env.PORT ?? 3000);
 app.use(cors());
 app.use(express.json());
 
+// 앱에서 자주 쓰는 공개 API들입니다.
+// /api/home은 홈 화면 첫 로드에 필요한 식단/랜덤 문구/운영 시간을 한 번에 돌려줍니다.
 app.get('/health', async (_request, response) => {
   response.json({
     status: 'ok',
@@ -199,6 +201,8 @@ app.get('/api/menus/current', async (request, response) => {
 });
 
 app.post('/api/menus/week', async (request, response) => {
+  // 주간 식단 업로드는 승인된 앱 기기에서만 허용합니다.
+  // deviceId는 앱 설치 시 생성되어 x-device-id 헤더로 전달됩니다.
   const approvedDevice = await isApprovedDevice(
     parseRequiredText(request.header('x-device-id')),
   );
@@ -322,6 +326,9 @@ app.get('/admin', (_request, response) => {
   response.type('html').send(adminPageHtml());
 });
 
+// 관리자 페이지 로그인용 세션입니다.
+// 브라우저가 앱 내부 deviceId를 알 수는 없으므로 최초 1회 입력받고,
+// 이후에는 HttpOnly 쿠키로 90일 동안 유지합니다.
 app.post('/api/admin/session', async (request, response) => {
   const deviceId = parseRequiredText(request.body?.deviceId);
   if (!deviceId) {
@@ -344,6 +351,8 @@ app.delete('/api/admin/session', (_request, response) => {
 });
 
 app.get('/api/admin/snapshot', requireAdminDevice, async (_request, response) => {
+  // 관리자 화면 첫 렌더링에 필요한 모든 테이블을 한 번에 내려줍니다.
+  // 작은 내부 도구라 API 호출 수보다 구현 단순성을 우선했습니다.
   response.json({
     menus: (await listMenuRows()).map((row) => ({
       date: row.date,
@@ -556,6 +565,8 @@ async function database(): Promise<SqlClient | null> {
 }
 
 async function ensureDatabase(client: SqlClient): Promise<void> {
+  // 서버리스 환경에서는 여러 요청이 동시에 들어올 수 있어 schema 생성 promise를
+  // 공유합니다. 같은 인스턴스 안에서는 테이블 생성이 한 번만 실행됩니다.
   if (databaseReady) return;
 
   databaseReadyPromise ??= createSchema(client)
@@ -571,6 +582,8 @@ async function ensureDatabase(client: SqlClient): Promise<void> {
 }
 
 async function createSchema(client: SqlClient): Promise<void> {
+  // 운영 DB가 비어 있어도 첫 요청 시 필요한 테이블과 기본 운영시간을 갖추게 합니다.
+  // seed 메뉴/문구는 개발과 초기 확인용이며, 실제 데이터는 관리자 페이지에서 수정합니다.
   await client`
     create table if not exists menus (
       date date primary key,
@@ -1137,6 +1150,9 @@ async function requireAdminDevice(
   response: express.Response,
   next: express.NextFunction,
 ): Promise<void> {
+  // 관리자 API는 두 경로를 허용합니다.
+  // 1. 테스트/스크립트용 x-admin-device-id 헤더
+  // 2. 관리자 페이지에서 발급한 HttpOnly 쿠키
   const deviceId = parseRequiredText(request.header('x-admin-device-id')) ?? getAdminCookieDeviceId(request);
   if (!deviceId) {
     response.status(401).json({ message: 'Admin device id is required' });
@@ -1189,9 +1205,12 @@ async function isAdminDevice(deviceId: string): Promise<boolean> {
   const configuredAdminDeviceId = parseRequiredText(process.env.ADMIN_DEVICE_ID);
   const registration = await getDeviceRegistration(deviceId);
   if (configuredAdminDeviceId) {
+    // 직원 기기가 여러 개 승인되어도 관리자 권한은 환경변수의 한 기기에 고정합니다.
     return deviceId === configuredAdminDeviceId && registration?.approved === 'Y';
   }
 
+  // 개발/초기 운영 편의용 fallback입니다. 승인된 기기가 하나뿐이면 그 기기를
+  // 관리자로 간주하지만, 실제 운영에서는 ADMIN_DEVICE_ID 설정을 권장합니다.
   const approvedDevices = await listApprovedDeviceRegistrationRows();
   return approvedDevices.length === 1 && approvedDevices[0].deviceId === deviceId;
 }
@@ -1372,6 +1391,8 @@ async function findOperatingHours(date: string, type: MealType) {
 }
 
 async function getCurrentMealType(date: string, at: Date): Promise<MealType> {
+  // 아침 종료 시각까지는 아침 식단을 보여주고, 이후에는 저녁 식단을 보여줍니다.
+  // 기준 시각은 클라이언트가 넘긴 at을 한국 시간으로 해석합니다.
   const hours = await findOperatingHours(date, 'breakfast');
   const currentMinutes = getKoreanTimeMinutes(at);
   const breakfastEndMinutes = parseTimeToMinutes(hours.end ?? '09:00');
@@ -1466,6 +1487,9 @@ function deviceRegistrationResponse(row: DeviceRegistrationRow) {
 }
 
 function adminPageHtml(): string {
+  // 별도 프론트엔드 빌드 없이 서버 한 파일로 관리 페이지를 배포하기 위해
+  // HTML/CSS/JS를 문자열로 제공합니다. 규모가 커지면 server/admin 같은 정적 파일로
+  // 분리하는 것이 다음 단계입니다.
   return `<!doctype html>
 <html lang="ko">
 <head>

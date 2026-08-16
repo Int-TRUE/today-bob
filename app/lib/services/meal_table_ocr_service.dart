@@ -6,6 +6,10 @@ import 'package:image/image.dart' as img;
 
 enum MealType { breakfast, dinner }
 
+// OCR 최종 단위입니다.
+//
+// index는 화면/디버그에서 보이는 1~14 순번이고, dayIndex는 월~일을 0~6으로
+// 다룹니다. mealType은 왼쪽 열 아침, 오른쪽 열 저녁을 나타냅니다.
 class MealCell {
   const MealCell({
     required this.index,
@@ -47,6 +51,8 @@ class MealTableOcrService {
       const MealTableImageProcessor();
 
   Future<MealTableOcrResult> recognize(String imagePath) async {
+    // 처리 순서:
+    // 원본 이미지 -> 표 검출 -> perspective 보정 -> 14개 셀 crop -> 셀별 한국어 OCR
     final cellImages = await _imageProcessor.extractCellImages(imagePath);
     final cells = <MealCell>[];
     final rawTexts = <String>[];
@@ -73,6 +79,8 @@ class MealTableOcrService {
   Future<void> close() => _textRecognizer.close();
 
   List<String> _menusFromRecognizedText(RecognizedText recognizedText) {
+    // ML Kit은 block/line 단위 순서를 항상 표의 시각적 순서로 보장하지 않으므로
+    // boundingBox.top 기준으로 다시 정렬해 메뉴 순서를 안정화합니다.
     final lines = <_RecognizedMenuLine>[];
     for (final block in recognizedText.blocks) {
       for (final line in block.lines) {
@@ -149,12 +157,18 @@ class MealTableImageProcessor {
       throw const MealTableOcrException('식단표 사진이 너무 작아요.');
     }
 
+    // 내부 선을 매번 완벽히 찾기보다, 전체 표를 먼저 펴고 고정 레이아웃
+    // 비율로 나누는 전략입니다. 촬영 각도가 조금 달라도 비교적 안정적입니다.
     final tableQuad = TableDetector().detect(source);
     final corrected = PerspectiveCorrector().correct(source, tableQuad);
     return MealGridCropper().crop(corrected);
   }
 }
 
+// 사진 안에서 식단표 전체 사각형을 찾습니다.
+//
+// 현재 식단표는 검은 표 선이 뚜렷하므로 긴 가로선을 찾고, 가장 위/아래
+// 가로선을 표의 경계로 사용합니다. 실패하면 촬영 샘플에 맞춘 보수적 fallback을 씁니다.
 class TableDetector {
   TableQuad detect(img.Image source) {
     final scale = source.width > 1000 ? 1000 / source.width : 1.0;
@@ -310,6 +324,7 @@ class TableDetector {
   }
 
   TableQuad _fallbackQuad(img.Image source) {
+    // 표 검출이 실패해도 앱이 죽지 않도록, 사진 중앙의 “대략 종이 영역”을 사용합니다.
     final marginX = source.width * 0.08;
     final marginTop = source.height * 0.14;
     final marginBottom = source.height * 0.04;
@@ -325,6 +340,10 @@ class TableDetector {
   }
 }
 
+// 비스듬히 찍힌 표를 정면에서 본 것처럼 펴는 단계입니다.
+//
+// 네 모서리의 대응 관계로 homography 행렬을 만들고, 출력 이미지의 각 픽셀이
+// 원본 이미지의 어느 위치에서 와야 하는지 역으로 샘플링합니다.
 class PerspectiveCorrector {
   img.Image correct(img.Image source, TableQuad quad) {
     final topWidth = quad.topLeft.distanceTo(quad.topRight);
@@ -448,6 +467,7 @@ class MealGridCropper {
         final columnLeft = columnIndex == 0 ? grid.left : grid.center;
         final columnRight = columnIndex == 0 ? grid.center : grid.right;
         final cellWidth = columnRight - columnLeft;
+        // 셀 테두리 선이 OCR 텍스트로 섞이지 않도록 약간 안쪽만 잘라냅니다.
         final insetX = (cellWidth * 0.045).round();
         final insetY = (cellHeight * 0.04).round();
         final cropX = columnLeft + insetX;
@@ -479,6 +499,9 @@ class MealGridCropper {
   }
 
   _MealGrid _detectGrid(img.Image image) {
+    // perspective 보정 후에는 표 비율이 거의 고정되므로, 요일 열을 제외한
+    // 식단 영역의 좌/중앙/우 위치를 비율로 잡습니다. 아래쪽은 검출된 마지막
+    // 가로선에 맞춰 잘라 일요일 영역이 너무 짧아지지 않게 합니다.
     final mask = _darkMask(image);
     final horizontals = _lineCenters(
       List.generate(image.height, (y) {

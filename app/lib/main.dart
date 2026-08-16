@@ -14,6 +14,10 @@ void main() {
   runApp(const TodayBobApp());
 }
 
+// 앱의 최상위 조립 지점입니다.
+//
+// 테스트에서는 아래 세 클라이언트를 가짜 구현으로 주입하고, 실제 앱에서는
+// 서버 API/기기 ID 저장소를 기본 구현으로 사용합니다.
 class TodayBobApp extends StatelessWidget {
   const TodayBobApp({
     super.key,
@@ -49,6 +53,14 @@ class TodayBobApp extends StatelessWidget {
   }
 }
 
+// 승인 게이트는 앱 첫 화면을 결정합니다.
+//
+// - 등록되지 않은 기기: 가입 신청 화면
+// - 승인 대기 기기: 입력값이 잠긴 신청 완료 화면
+// - 승인된 기기: 실제 홈 화면
+//
+// 식단 업로드 API도 같은 deviceId를 요구하므로, 승인된 deviceId를 HomeScreen까지
+// 내려보내는 것이 이 흐름의 핵심입니다.
 class DeviceApprovalGate extends StatefulWidget {
   const DeviceApprovalGate({
     super.key,
@@ -95,6 +107,7 @@ class _DeviceApprovalGateState extends State<DeviceApprovalGate>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 관리자가 웹에서 승인한 뒤 앱으로 돌아오는 상황을 위해 재조회합니다.
     if (state == AppLifecycleState.resumed && !_isApproved) {
       _loadRegistration(silent: true);
     }
@@ -461,6 +474,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+// 홈 화면 상태는 “이번 주 범위 안의 선택 날짜”와 서버에서 받은 홈 데이터를
+// 따로 들고 갑니다. 날짜 이동은 현재 주 월~일 안에서만 허용합니다.
 class _HomeScreenState extends State<HomeScreen> {
   late DateTime _selectedDate;
   late DateTime _weekStart;
@@ -514,6 +529,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final hasMenu = _homeData?.hasMenu ?? false;
 
     if (hasMenu) {
+      // 이미 식단이 있는 날에는 사용자가 실수로 덮어쓰지 않도록 한 번 묻습니다.
       final shouldContinue = await showDialog<bool>(
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.12),
@@ -1171,11 +1187,15 @@ class HomeApiClient {
   static String _defaultBaseUrl() {
     const configured = String.fromEnvironment('API_BASE_URL');
     if (configured.isNotEmpty) return configured;
+    // Android 에뮬레이터에서 127.0.0.1은 에뮬레이터 자신을 의미하므로
+    // 호스트 맥의 로컬 서버는 10.0.2.2로 접근합니다.
     if (Platform.isAndroid) return 'http://10.0.2.2:3000';
     return 'http://127.0.0.1:3000';
   }
 }
 
+// 가입 신청/승인 상태 확인 전용 API 클라이언트입니다.
+// 홈 API와 분리해두면 스플래시 게이트 테스트가 쉬워집니다.
 class DeviceApprovalApiClient {
   DeviceApprovalApiClient({String? baseUrl})
     : baseUrl = baseUrl ?? HomeApiClient._defaultBaseUrl();
@@ -1275,6 +1295,8 @@ class DeviceIdentityStore {
   }
 
   String _createDeviceId() {
+    // 기기 고유 식별자를 직접 읽지 않고, 앱 설치 단위의 UUID를 만들어 저장합니다.
+    // 사용자가 앱을 삭제하면 새 기기로 다시 가입 신청하는 흐름이 됩니다.
     final random = Random.secure();
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     bytes[6] = (bytes[6] & 0x0f) | 0x40;

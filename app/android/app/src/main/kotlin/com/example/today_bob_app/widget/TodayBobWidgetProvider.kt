@@ -18,6 +18,8 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.concurrent.thread
 
+// Android 홈 화면 위젯은 Flutter 엔진을 띄우지 않는 네이티브 RemoteViews입니다.
+// 앱 화면과 같은 /api/home을 직접 호출해서 현재 시간대 메뉴와 운영시간만 작게 보여줍니다.
 class TodayBobWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(
         context: Context,
@@ -31,6 +33,7 @@ class TodayBobWidgetProvider : AppWidgetProvider() {
             )
         }
 
+        // AppWidgetProvider 콜백은 오래 붙잡으면 안 되므로 네트워크 호출은 별도 스레드에서 처리합니다.
         thread(name = "TodayBobWidgetUpdater") {
             val mealData = fetchCurrentMealData()
             appWidgetIds.forEach { appWidgetId ->
@@ -65,6 +68,8 @@ class TodayBobWidgetProvider : AppWidgetProvider() {
     }
 
     private fun fetchCurrentMealData(): WidgetMealData {
+        // 위젯은 실패 상태를 자세히 보여줄 공간이 없어서, 서버 오류/식단 없음 모두 같은
+        // 짧은 fallback 문구로 정리합니다.
         val fallback = WidgetMealData(listOf("등록된 식단이 없어요"), "")
 
         return runCatching {

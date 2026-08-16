@@ -30,6 +30,13 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // ML Kit Flutter 플러그인이 여러 언어 recognizer 클래스를 조건부로 참조해
+            // R8 release 빌드에서 누락 경고가 발생합니다. proguard-rules.pro에는
+            // 현재 쓰지 않는 언어 옵션 클래스 경고만 무시하는 규칙을 둡니다.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
