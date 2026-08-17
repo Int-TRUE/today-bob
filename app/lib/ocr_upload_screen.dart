@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
@@ -31,24 +32,43 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
     super.dispose();
   }
 
-  Future<void> _pickAndRecognize(ImageSource source) async {
+  Future<void> _openGuidedCamera() async {
+    if (_isProcessing) return;
+
+    final imagePath = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => const GuidedCameraCaptureScreen(),
+      ),
+    );
+    if (imagePath == null || !mounted) return;
+
+    await _recognizeImagePath(imagePath);
+  }
+
+  Future<void> _pickFromGallery() async {
     if (_isProcessing) return;
 
     // 너무 큰 원본은 OCR 정확도보다 메모리 사용량에 부담이 커서 적당히 줄입니다.
     // 실제 표 분할 단계에서는 이 이미지 안에서 다시 perspective 보정이 일어납니다.
     final image = await _imagePicker.pickImage(
-      source: source,
+      source: ImageSource.gallery,
       imageQuality: 95,
       maxWidth: 2200,
     );
     if (image == null || !mounted) return;
+
+    await _recognizeImagePath(image.path);
+  }
+
+  Future<void> _recognizeImagePath(String imagePath) async {
+    if (_isProcessing) return;
 
     setState(() {
       _isProcessing = true;
     });
 
     try {
-      final result = await _mealTableOcrService.recognize(image.path);
+      final result = await _mealTableOcrService.recognize(imagePath);
       final weeklyMenu = WeeklyMenuOcrResult.fromMealTableOcrResult(result);
       debugPrint(
         'Cell OCR matchedDays=${weeklyMenu.matchedDays}, '
@@ -129,9 +149,7 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    onPressed: _isProcessing
-                        ? null
-                        : () => _pickAndRecognize(ImageSource.camera),
+                    onPressed: _isProcessing ? null : _openGuidedCamera,
                     icon: _isProcessing
                         ? const SizedBox(
                             width: 34,
@@ -154,9 +172,7 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
                   ),
                   const SizedBox(height: 10),
                   TextButton(
-                    onPressed: _isProcessing
-                        ? null
-                        : () => _pickAndRecognize(ImageSource.gallery),
+                    onPressed: _isProcessing ? null : _pickFromGallery,
                     child: const Text(
                       '앨범에서 선택',
                       style: TextStyle(color: Colors.white),
@@ -170,6 +186,392 @@ class _OcrUploadScreenState extends State<OcrUploadScreen> {
       ),
     );
   }
+}
+
+class GuidedCameraCaptureScreen extends StatefulWidget {
+  const GuidedCameraCaptureScreen({super.key});
+
+  @override
+  State<GuidedCameraCaptureScreen> createState() =>
+      _GuidedCameraCaptureScreenState();
+}
+
+class _GuidedCameraCaptureScreenState extends State<GuidedCameraCaptureScreen>
+    with WidgetsBindingObserver {
+  CameraController? _controller;
+  Future<void>? _initializeFuture;
+  bool _isTakingPicture = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _initializeFuture = _initializeCamera();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    if (state == AppLifecycleState.inactive) {
+      controller.dispose();
+      _controller = null;
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeFuture = _initializeCamera();
+      setState(() {});
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        throw CameraException('no_camera', '사용 가능한 카메라가 없어요.');
+      }
+
+      final backCamera = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+      final controller = CameraController(
+        backCamera,
+        ResolutionPreset.veryHigh,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      await _controller?.dispose();
+      _controller = controller;
+      await controller.initialize();
+      await controller.setFlashMode(FlashMode.off);
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = null;
+      });
+    } on CameraException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = error.description ?? '카메라를 열지 못했어요.';
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = '카메라를 열지 못했어요.';
+      });
+    }
+  }
+
+  Future<void> _takePicture() async {
+    final controller = _controller;
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        _isTakingPicture) {
+      return;
+    }
+
+    setState(() {
+      _isTakingPicture = true;
+    });
+
+    try {
+      final image = await controller.takePicture();
+      if (!mounted) return;
+      Navigator.of(context).pop(image.path);
+    } on CameraException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isTakingPicture = false;
+        _errorMessage = error.description ?? '사진을 촬영하지 못했어요.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: FutureBuilder<void>(
+        future: _initializeFuture,
+        builder: (context, snapshot) {
+          final controller = _controller;
+          final isReady =
+              snapshot.connectionState == ConnectionState.done &&
+              controller != null &&
+              controller.value.isInitialized &&
+              _errorMessage == null;
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: isReady
+                    ? Center(
+                        child: AspectRatio(
+                          aspectRatio: _previewAspectRatio(controller),
+                          child: CameraPreview(controller),
+                        ),
+                      )
+                    : const ColoredBox(
+                        color: Color(0xFF111111),
+                        child: Center(
+                          child: CircularProgressIndicator(color: Colors.white),
+                        ),
+                      ),
+              ),
+              Positioned.fill(
+                child: CustomPaint(painter: MealTableGuidePainter()),
+              ),
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    color: Colors.white,
+                    iconSize: 32,
+                    tooltip: '닫기',
+                  ),
+                ),
+              ),
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(68, 18, 68, 0),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.42),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 9,
+                        ),
+                        child: Text(
+                          '표 전체를 선 안에 맞춰주세요',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (_errorMessage != null)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
+                ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _errorMessage == null
+                              ? '밝은 곳에서 종이가 화면을 크게 채우면 더 잘 인식돼요'
+                              : '권한을 확인한 뒤 다시 시도해주세요',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.88),
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        IconButton(
+                          onPressed: isReady && !_isTakingPicture
+                              ? _takePicture
+                              : null,
+                          icon: _isTakingPicture
+                              ? const SizedBox(
+                                  width: 30,
+                                  height: 30,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    color: Colors.black,
+                                  ),
+                                )
+                              : const Icon(Icons.camera_alt_outlined),
+                          style: IconButton.styleFrom(
+                            backgroundColor: const Color(0xFFEFEFEF),
+                            foregroundColor: Colors.black,
+                            disabledBackgroundColor: const Color(0xFFBDBDBD),
+                            fixedSize: const Size(72, 72),
+                            side: const BorderSide(
+                              color: Colors.black,
+                              width: 2,
+                            ),
+                          ),
+                          iconSize: 42,
+                          tooltip: '촬영',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  double _previewAspectRatio(CameraController controller) {
+    final cameraRatio = controller.value.aspectRatio;
+    final mediaSize = MediaQuery.sizeOf(context);
+    final isPortrait = mediaSize.height >= mediaSize.width;
+
+    // 카메라 센서는 보통 가로 기준 비율을 돌려주기 때문에 세로 화면에서는 뒤집어서
+    // 사용해야 촬영 화면과 가이드라인이 같은 방향으로 보입니다.
+    if (isPortrait && cameraRatio > 1) {
+      return 1 / cameraRatio;
+    }
+    if (!isPortrait && cameraRatio < 1) {
+      return 1 / cameraRatio;
+    }
+    return cameraRatio;
+  }
+}
+
+class MealTableGuidePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final guideWidth = math.min(size.width * 0.82, size.height * 0.48);
+    final guideHeight = math.min(size.height * 0.68, guideWidth * 1.58);
+    final guideRect = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height * 0.48),
+      width: guideWidth,
+      height: guideHeight,
+    );
+
+    final dimPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.46)
+      ..style = PaintingStyle.fill;
+    final dimPath = Path()
+      ..addRect(Offset.zero & size)
+      ..addRRect(RRect.fromRectAndRadius(guideRect, const Radius.circular(16)))
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(dimPath, dimPaint);
+
+    final borderPaint = Paint()
+      ..color = const Color(0xFFFF726A)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(guideRect, const Radius.circular(16)),
+      borderPaint,
+    );
+
+    final linePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.72)
+      ..strokeWidth = 1.2
+      ..style = PaintingStyle.stroke;
+
+    final weekdayX = guideRect.left + guideRect.width * 0.14;
+    final mealDividerX = guideRect.left + guideRect.width * 0.50;
+    _drawDashedLine(
+      canvas,
+      Offset(weekdayX, guideRect.top),
+      Offset(weekdayX, guideRect.bottom),
+      linePaint,
+    );
+    _drawDashedLine(
+      canvas,
+      Offset(mealDividerX, guideRect.top),
+      Offset(mealDividerX, guideRect.bottom),
+      linePaint,
+    );
+
+    for (var index = 1; index < 7; index += 1) {
+      final y = guideRect.top + guideRect.height / 7 * index;
+      _drawDashedLine(
+        canvas,
+        Offset(guideRect.left, y),
+        Offset(guideRect.right, y),
+        linePaint,
+      );
+    }
+
+    _drawLabel(
+      canvas,
+      '요일',
+      Offset(guideRect.left + guideRect.width * 0.07, guideRect.top + 24),
+    );
+    _drawLabel(
+      canvas,
+      '아침',
+      Offset(guideRect.left + guideRect.width * 0.32, guideRect.top + 24),
+    );
+    _drawLabel(
+      canvas,
+      '저녁',
+      Offset(guideRect.left + guideRect.width * 0.74, guideRect.top + 24),
+    );
+  }
+
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
+    const dashLength = 8.0;
+    const gapLength = 6.0;
+    final vector = end - start;
+    final distance = vector.distance;
+    if (distance == 0) return;
+
+    final direction = vector / distance;
+    var drawn = 0.0;
+    while (drawn < distance) {
+      final next = math.min(drawn + dashLength, distance);
+      canvas.drawLine(
+        start + direction * drawn,
+        start + direction * next,
+        paint,
+      );
+      drawn = next + gapLength;
+    }
+  }
+
+  void _drawLabel(Canvas canvas, String label, Offset center) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.82),
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    textPainter.paint(
+      canvas,
+      Offset(center.dx - textPainter.width / 2, center.dy),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant MealTableGuidePainter oldDelegate) => false;
 }
 
 class OcrFailureScreen extends StatelessWidget {
