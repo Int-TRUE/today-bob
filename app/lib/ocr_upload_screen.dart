@@ -407,8 +407,6 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
                       result: _weeklyMenu,
                       onMenuChanged: _updateMenuCell,
                     ),
-                    const SizedBox(height: 14),
-                    OcrCellDebugPanel(rawText: _weeklyMenu.rawText),
                   ],
                 ),
               ),
@@ -481,44 +479,6 @@ class _OcrResultScreenState extends State<OcrResultScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class OcrCellDebugPanel extends StatelessWidget {
-  const OcrCellDebugPanel({super.key, required this.rawText});
-
-  final String rawText;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE1E1E1)),
-      ),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-        title: const Text(
-          'OCR 셀 결과 보기',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        ),
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SelectableText(
-              rawText.trim().isEmpty ? '(empty)' : rawText.trim(),
-              style: const TextStyle(
-                color: Color(0xFF333333),
-                fontFamily: 'monospace',
-                fontSize: 11,
-                height: 1.35,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
